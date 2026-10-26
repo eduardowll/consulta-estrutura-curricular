@@ -1,0 +1,420 @@
+{
+  "curso": {
+    "sigla": "TADS",
+    "nome": "Tecnologia em Análise e Desenvolvimento de Sistemas",
+    "instituicao": "UFRN"
+  },
+  "estrutura": {
+    "ano": 2019,
+    "fonte": "ESTRUTURAS_CURRICULARES.pdf",
+    "pagina": 2
+  },
+  "componentes": [
+    {
+      "codigo": "TAD0001",
+      "nome": "FUNDAMENTOS DA COMPUTACAO",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0102",
+      "nome": "ALGORITMOS E PROGRAMAÇÃO",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0201",
+      "nome": "RACIOCÍNIO LÓGICO",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0105",
+      "nome": "MATEMATICA APLICADA I",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0006",
+      "nome": "SISTEMAS OPERACIONAIS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0202",
+      "nome": "LEITURA E PRODUÇÃO DE TEXTOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0012",
+      "nome": "PROCESSO DE DESENVOLVIMENTO DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0009",
+      "nome": "PROGRAMACAO ORIENTADA A OBJETOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0103",
+      "nome": "BANCO DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0013",
+      "nome": "MATEMATICA APLICADA II",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0111",
+      "nome": "PROGRAMACAO VISUAL E AUTORIA WEB",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0114",
+      "nome": "REDES DE COMPUTADORES",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0016",
+      "nome": "VERTENTES PRODUTIVAS NAS CIENCIAS AGRARIAS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0004",
+      "nome": "ANALISE E PROJETO ORIENTADO A OBJETOS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0203",
+      "nome": "GESTÃO DE QUALIDADE DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0025",
+      "nome": "INTELIGÊNCIA COMPUTACIONAL",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0019",
+      "nome": "PROGRAMACAO WEB",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0020",
+      "nome": "ESTRUTURAS DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0123",
+      "nome": "SISTEMAS DIGITAIS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0022",
+      "nome": "ESTATISTICA APLICADA",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0018",
+      "nome": "PROCESSAMENTO DIGITAL DE IMAGENS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0027",
+      "nome": "PROGRAMACAO PARA DISPOSITIVOS MOVEIS",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0028",
+      "nome": "PLANEJAMENTO E GERENCIA DE PROJETOS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0029",
+      "nome": "ARQUITETURA DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0030",
+      "nome": "MICROCONTROLADORES",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0032",
+      "nome": "METODOLOGIA DO TRABALHO CIENTIFICO",
+      "carga": 2,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0204",
+      "nome": "FUNDAMENTOS E TÉCNICAS EM CIÊNCIAS DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0108",
+      "nome": "CONTEXTO GEOGRAFICO REGIONAL",
+      "carga": 2,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0015",
+      "nome": "EMPREENDEDORISMO",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0156",
+      "nome": "PROJETOS APLICADOS I",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0205",
+      "nome": "TRABALHO DE CONCLUSAO DE CURSO I",
+      "carga": 2,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0160",
+      "nome": "SISTEMAS DISTRIBUÍDOS",
+      "carga": 2,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0140",
+      "nome": "TRABALHO DE CONCLUSAO DE CURSO II",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "OPTATIVAS",
+      "nome": "OPTATIVAS",
+      "carga": 16,
+      "unidade_carga": "creditos",
+      "natureza": "optativa",
+      "periodo": null
+    },
+    {
+      "codigo": "ATIVIDADES_COMPLEMENTARES",
+      "nome": "ATIVIDADES COMPLEMENTARES",
+      "carga": 180,
+      "unidade_carga": "horas",
+      "natureza": "atividade_complementar",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0157",
+      "nome": "PROJETOS APLICADOS II",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0035",
+      "nome": "LEGISLACAO E ETICA EM TI",
+      "carga": 2,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    }
+  ],
+  "relacoes": [
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0009",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0105",
+      "destino": "TAD0013",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0018",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0009",
+      "destino": "TAD0019",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0020",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0025",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0009",
+      "destino": "TAD0027",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0009",
+      "destino": "TAD0029",
+      "tipo": "PRE",
+      "logica": "OU"
+    },
+    {
+      "origem": "TAD0103",
+      "destino": "TAD0029",
+      "tipo": "PRE",
+      "logica": "OU"
+    },
+    {
+      "origem": "TAD0111",
+      "destino": "TAD0029",
+      "tipo": "PRE",
+      "logica": "OU"
+    },
+    {
+      "origem": "TAD0012",
+      "destino": "TAD0156",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0156",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0103",
+      "destino": "TAD0156",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0028",
+      "destino": "TAD0157",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0156",
+      "destino": "TAD0157",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0114",
+      "destino": "TAD0160",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0022",
+      "destino": "TAD0204",
+      "tipo": "PRE",
+      "logica": "E"
+    },
+    {
+      "origem": "TAD0102",
+      "destino": "TAD0204",
+      "tipo": "PRE",
+      "logica": "E"
+    }
+  ]
+}
