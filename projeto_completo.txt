@@ -1,0 +1,1028 @@
+==> etl/texto.py <==
+"""Utilidades de texto compartilhadas pelos loaders."""
+import unicodedata
+
+
+def normalizar(s: str) -> str:
+    """minúsculas e sem acento: 'PROGRAMAÇÃO' -> 'programacao' (para busca por nome)."""
+    sem_acento = unicodedata.normalize("NFD", s or "")
+    return "".join(c for c in sem_acento if unicodedata.category(c) != "Mn").lower()
+==> etl/load_mongo.py <==
+from __future__ import annotations
+ 
+import argparse
+import json
+import sys
+from pathlib import Path
+ 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import config  # noqa: E402
+from load_postgres import validar  
+from texto import normalizar  # noqa: E402
+ 
+ 
+def montar(doc: dict) -> tuple[dict, list[dict]]:
+    """Função pura: JSON canônico -> (doc da estrutura, docs dos componentes)."""
+    sigla, ano = doc["curso"]["sigla"], doc["estrutura"]["ano"]
+    por_codigo = {c["codigo"]: c for c in doc["componentes"]}
+ 
+    prereqs: dict[str, list[dict]] = {c: [] for c in por_codigo}
+    for r in doc["relacoes"]:
+        tipo = r.get("tipo", "PRE")
+        prereqs[r["destino"]].append({
+            "codigo": r["origem"],
+            "nome": por_codigo[r["origem"]]["nome"],
+            "tipo": tipo,
+            "logica": r.get("logica", "E"),
+        })
+ 
+    componentes = []
+    for c in doc["componentes"]:
+        lista = sorted(prereqs[c["codigo"]], key=lambda p: p["codigo"])
+        componentes.append({
+            "_id": f"{sigla}:{ano}:{c['codigo']}",
+            "curso": sigla,
+            "ano": ano,
+            "codigo": c["codigo"],
+            "nome": c["nome"],
+            "nome_norm": normalizar(c["nome"]),
+            "carga": c.get("carga"),
+            "unidade_carga": c.get("unidade_carga"),
+            "natureza": c["natureza"],
+            "periodo": c.get("periodo"),
+            "prerequisitos": lista,
+            "prereq_codigos": [p["codigo"] for p in lista if p["tipo"] == "PRE"],
+        })
+ 
+    estrutura = {
+        "_id": f"{sigla}:{ano}",
+        "curso": sigla,
+        "curso_nome": doc["curso"]["nome"],
+        "instituicao": doc["curso"].get("instituicao"),
+        "ano": ano,
+        "fonte": doc["estrutura"].get("fonte"),
+        "n_componentes": len(componentes),
+        "n_relacoes": len(doc["relacoes"]),
+    }
+    return estrutura, componentes
+ 
+ 
+INDICES = [
+    ([("curso", 1), ("ano", 1), ("codigo", 1)], {"unique": True, "name": "uq_curso_ano_codigo"}),
+    ([("curso", 1), ("ano", 1), ("nome_norm", 1)], {"name": "ix_nome"}),
+    ([("curso", 1), ("ano", 1), ("prereq_codigos", 1)], {"name": "ix_prereq_codigos"}),   # multikey
+    ([("curso", 1), ("ano", 1), ("natureza", 1)], {"name": "ix_natureza"}),
+]
+ 
+ 
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("json", nargs="+", help="arquivos JSON canônicos")
+    args = ap.parse_args()
+ 
+    docs = []
+    for arq in args.json:
+        doc = json.loads(Path(arq).read_text(encoding="utf-8"))
+        erros = validar(doc)
+        if erros:
+            print(f"{arq}: JSON inválido:", *erros, sep="\n  - ", file=sys.stderr)
+            return 1
+        docs.append((arq, doc))
+ 
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+ 
+    cfg = config.mongo()
+    client = MongoClient(cfg["uri"], serverSelectionTimeoutMS=5000)
+    try:
+        client.admin.command("ping")
+    except PyMongoError as e:
+        print(f"Não conectou no Mongo em {cfg['destino']}. Confira o .env e o `docker compose ps`.\n{e}",
+              file=sys.stderr)
+        return 2
+    db = client[cfg["dbname"]]
+ 
+    for chave, opcoes in INDICES:
+        db.componentes.create_index(chave, **opcoes)
+    for arq, doc in docs:
+        estrutura, componentes = montar(doc)
+        db.componentes.delete_many({"curso": estrutura["curso"], "ano": estrutura["ano"]})
+        db.componentes.insert_many(componentes)
+        db.estruturas.replace_one({"_id": estrutura["_id"]}, estrutura, upsert=True)
+        print(f"carregado: {arq}")
+ 
+    print("\ncurso  ano  componentes  relações (prerequisitos embutidos)")
+    for e in db.estruturas.find().sort([("curso", 1), ("ano", 1)]):
+        n_c = db.componentes.count_documents({"curso": e["curso"], "ano": e["ano"]})
+        agg = list(db.componentes.aggregate([
+            {"$match": {"curso": e["curso"], "ano": e["ano"]}},
+            {"$group": {"_id": None, "n": {"$sum": {"$size": "$prerequisitos"}}}}]))
+        print(f"{e['curso']:<6} {e['ano']}  {n_c:>11}  {agg[0]['n'] if agg else 0:>8}")
+    client.close()
+    return 0
+ 
+ 
+if __name__ == "__main__":
+    sys.exit(main())
+==> etl/load_postgres.py <==
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import config  # noqa: E402
+
+SCHEMA = config.RAIZ / "db" / "postgres" / "init.sql"
+LOGICAS = {"E", "OU"}
+TIPOS = {"PRE", "CO", "EQUIV"}
+NATUREZAS = {"obrigatoria", "optativa", "atividade_complementar", "outra"}
+
+# Validação
+
+def validar(doc: dict) -> list[str]:
+    erros: list[str] = []
+    for chave in ("curso", "estrutura", "componentes", "relacoes"):
+        if chave not in doc:
+            return [f"JSON sem a chave obrigatória '{chave}'"]
+    if not doc["curso"].get("sigla") or not doc["curso"].get("nome"):
+        erros.append("curso precisa de 'sigla' e 'nome'")
+    if not isinstance(doc["estrutura"].get("ano"), int):
+        erros.append("estrutura.ano precisa ser inteiro")
+
+    codigos = [c.get("codigo") for c in doc["componentes"]]
+    if len(set(codigos)) != len(codigos):
+        repetidos = sorted({c for c in codigos if codigos.count(c) > 1})
+        erros.append(f"códigos de componente repetidos: {repetidos}")
+    for c in doc["componentes"]:
+        if not c.get("codigo") or not c.get("nome"):
+            erros.append(f"componente sem codigo/nome: {c}")
+        if c.get("natureza") not in NATUREZAS:
+            erros.append(f"{c.get('codigo')}: natureza inválida '{c.get('natureza')}'")
+
+    conhecidos = set(codigos)
+    arestas: dict[str, set[str]] = {}
+    vistos = set()
+    for r in doc["relacoes"]:
+        o, d = r.get("origem"), r.get("destino")
+        if o not in conhecidos or d not in conhecidos:
+            erros.append(f"relação referencia componente inexistente: {o} -> {d}")
+            continue
+        if o == d:
+            erros.append(f"relação de {o} com ele mesmo")
+        if r.get("tipo", "PRE") not in TIPOS or r.get("logica", "E") not in LOGICAS:
+            erros.append(f"tipo/logica inválido em {o} -> {d}: {r}")
+        chave = (o, d, r.get("tipo", "PRE"))
+        if chave in vistos:
+            erros.append(f"relação duplicada: {chave}")
+        vistos.add(chave)
+        if r.get("tipo", "PRE") == "PRE":
+            arestas.setdefault(d, set()).add(o)
+
+    # pré-requisitos formam um DAG: ciclo = erro de extração
+    estado: dict[str, int] = {}
+
+    def tem_ciclo(no: str) -> bool:
+        estado[no] = 1
+        for p in arestas.get(no, ()):
+            if estado.get(p) == 1 or (estado.get(p) is None and tem_ciclo(p)):
+                return True
+        estado[no] = 2
+        return False
+
+    if any(estado.get(n) is None and tem_ciclo(n) for n in list(arestas)):
+        erros.append("ciclo nos pré-requisitos")
+    return erros
+
+# Comandos SQL
+
+ESTRUTURA_ID = """(SELECT e.id FROM estrutura_curricular e
+                   JOIN curso cu ON cu.id = e.curso_id
+                   WHERE cu.sigla = %(sigla)s AND e.ano = %(ano)s)"""
+
+
+def comandos(doc: dict) -> list[tuple[str, dict]]:
+    p = {
+        "sigla": doc["curso"]["sigla"],
+        "nome": doc["curso"]["nome"],
+        "instituicao": doc["curso"].get("instituicao"),
+        "ano": doc["estrutura"]["ano"],
+        "fonte": doc["estrutura"].get("fonte"),
+        "componentes": json.dumps(doc["componentes"], ensure_ascii=False),
+        "relacoes": json.dumps(doc["relacoes"], ensure_ascii=False),
+    }
+    return [
+        # 1. curso
+        ("""INSERT INTO curso (sigla, nome, instituicao)
+            VALUES (%(sigla)s, %(nome)s, %(instituicao)s)
+            ON CONFLICT (sigla) DO UPDATE
+              SET nome = EXCLUDED.nome, instituicao = EXCLUDED.instituicao""", p),
+        # 2. estrutura (curso + ano)
+        ("""INSERT INTO estrutura_curricular (curso_id, ano, fonte)
+            SELECT id, %(ano)s, %(fonte)s FROM curso WHERE sigla = %(sigla)s
+            ON CONFLICT (curso_id, ano) DO UPDATE SET fonte = EXCLUDED.fonte""", p),
+        # 3. limpa a versão anterior desta estrutura (as relações saem em cascata)
+        (f"DELETE FROM estrutura_componente WHERE estrutura_id = {ESTRUTURA_ID}", p),
+        # 4. identidade dos componentes no curso
+        ("""INSERT INTO componente (curso_id, codigo)
+            SELECT cu.id, x.codigo
+            FROM curso cu,
+                 jsonb_to_recordset(%(componentes)s::jsonb) AS x(codigo text)
+            WHERE cu.sigla = %(sigla)s
+            ON CONFLICT (curso_id, codigo) DO NOTHING""", p),
+        # 5. atributos dos componentes nesta estrutura
+        (f"""INSERT INTO estrutura_componente
+               (estrutura_id, componente_id, nome, carga, unidade_carga, natureza, periodo)
+            SELECT {ESTRUTURA_ID}, c.id, x.nome, x.carga, x.unidade_carga, x.natureza, x.periodo
+            FROM curso cu
+            CROSS JOIN jsonb_to_recordset(%(componentes)s::jsonb)
+                 AS x(codigo text, nome text, carga int, unidade_carga text,
+                      natureza text, periodo int)
+            JOIN componente c ON c.curso_id = cu.id AND c.codigo = x.codigo
+            WHERE cu.sigla = %(sigla)s""", p),
+        # 6. relações (pré-requisitos)
+        (f"""INSERT INTO relacao_componente
+               (estrutura_id, origem_id, destino_id, tipo, logica)
+            SELECT {ESTRUTURA_ID}, o.id, d.id, COALESCE(r.tipo, 'PRE'), COALESCE(r.logica, 'E')
+            FROM curso cu
+            CROSS JOIN jsonb_to_recordset(%(relacoes)s::jsonb)
+                 AS r(origem text, destino text, tipo text, logica text)
+            JOIN componente o ON o.curso_id = cu.id AND o.codigo = r.origem
+            JOIN componente d ON d.curso_id = cu.id AND d.codigo = r.destino
+            WHERE cu.sigla = %(sigla)s""", p),
+    ]
+
+
+RESUMO = """
+SELECT cu.sigla, e.ano,
+       (SELECT count(*) FROM estrutura_componente ec WHERE ec.estrutura_id = e.id),
+       (SELECT count(*) FROM relacao_componente  r  WHERE r.estrutura_id  = e.id)
+FROM estrutura_curricular e JOIN curso cu ON cu.id = e.curso_id
+ORDER BY cu.sigla, e.ano
+"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("json", nargs="*", help="arquivos JSON canônicos")
+    ap.add_argument("--so-schema", action="store_true", help="só cria as tabelas")
+    args = ap.parse_args()
+
+    docs = []
+    for arq in args.json:
+        doc = json.loads(Path(arq).read_text(encoding="utf-8"))
+        erros = validar(doc)
+        if erros:
+            print(f"{arq}: JSON inválido:", *erros, sep="\n  - ", file=sys.stderr)
+            return 1
+        docs.append((arq, doc))
+    if not docs and not args.so_schema:
+        ap.error("informe ao menos um JSON (ou --so-schema)")
+
+    import psycopg2  # import tardio: validar/comandos funcionam sem o driver
+
+    cfg = config.postgres()
+    try:
+        conn = psycopg2.connect(**cfg)
+    except psycopg2.OperationalError as e:
+        print(f"Não conectou em {cfg['host']}:{cfg['port']}/{cfg['dbname']} "
+              f"(usuário {cfg['user']}). Confira o .env e o `docker compose ps`.\n{e}", file=sys.stderr)
+        return 2
+    with conn:                               # uma transação só
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA.read_text(encoding="utf-8"))
+            for arq, doc in docs:
+                for sql, params in comandos(doc):
+                    cur.execute(sql, params)
+                print(f"carregado: {arq}")
+            cur.execute(RESUMO)
+            print("\ncurso  ano  componentes  relações")
+            for sigla, ano, n_c, n_r in cur.fetchall():
+                print(f"{sigla:<6} {ano}  {n_c:>11}  {n_r:>8}")
+    conn.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+==> etl/load_neo4j.py <==
+from __future__ import annotations
+ 
+import argparse
+import json
+import sys
+from pathlib import Path
+ 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import config  # noqa: E402
+from load_postgres import validar  # noqa: E402
+from texto import normalizar  # noqa: E402
+ 
+TIPO_REL = {"PRE": "REQUER", "CO": "CORREQUER", "EQUIV": "EQUIVALE"}   # whitelist (tipo de aresta não é parâmetro)
+ 
+SCHEMA = [
+    "CREATE CONSTRAINT curso_sigla IF NOT EXISTS FOR (c:Curso) REQUIRE c.sigla IS UNIQUE",
+    "CREATE CONSTRAINT estrutura_id IF NOT EXISTS FOR (e:Estrutura) REQUIRE e.id IS UNIQUE",
+    "CREATE CONSTRAINT componente_id IF NOT EXISTS FOR (c:Componente) REQUIRE c.id IS UNIQUE",
+    "CREATE INDEX componente_chave IF NOT EXISTS FOR (c:Componente) ON (c.curso, c.ano, c.codigo)",
+    "CREATE TEXT INDEX componente_nome_txt IF NOT EXISTS FOR (c:Componente) ON (c.nome_norm)",
+]
+ 
+ 
+def montar(doc: dict) -> dict:
+    """Função pura: JSON canônico -> parâmetros das queries Cypher."""
+    sigla, ano = doc["curso"]["sigla"], doc["estrutura"]["ano"]
+    nid = lambda codigo: f"{sigla}:{ano}:{codigo}"
+ 
+    nos = [{
+        "id": nid(c["codigo"]), "curso": sigla, "ano": ano, "codigo": c["codigo"],
+        "nome": c["nome"], "nome_norm": normalizar(c["nome"]),
+        "carga": c.get("carga"), "unidade_carga": c.get("unidade_carga"),
+        "natureza": c["natureza"], "periodo": c.get("periodo"),
+    } for c in doc["componentes"]]
+ 
+    rels: dict[str, list[dict]] = {}
+    for r in doc["relacoes"]:
+        tipo = TIPO_REL[r.get("tipo", "PRE")]
+        # aresta sai da disciplina que EXIGE e aponta para o pré-requisito
+        rels.setdefault(tipo, []).append({
+            "de": nid(r["destino"]), "para": nid(r["origem"]), "logica": r.get("logica", "E")})
+ 
+    return {
+        "curso": {"sigla": sigla, "nome": doc["curso"]["nome"], "instituicao": doc["curso"].get("instituicao")},
+        "estrutura": {"id": f"{sigla}:{ano}", "curso": sigla, "ano": ano, "fonte": doc["estrutura"].get("fonte")},
+        "nos": nos,
+        "rels": rels,
+    }
+ 
+ 
+def carregar(tx, p: dict) -> None:
+    tx.run("MATCH (c:Componente {curso: $sigla, ano: $ano}) DETACH DELETE c",
+           sigla=p["estrutura"]["curso"], ano=p["estrutura"]["ano"])
+    tx.run("""MERGE (cu:Curso {sigla: $curso.sigla})
+              SET cu.nome = $curso.nome, cu.instituicao = $curso.instituicao
+              MERGE (e:Estrutura {id: $est.id})
+              SET e.curso = $est.curso, e.ano = $est.ano, e.fonte = $est.fonte
+              MERGE (cu)-[:TEM_ESTRUTURA]->(e)""", curso=p["curso"], est=p["estrutura"])
+    tx.run("""MATCH (e:Estrutura {id: $eid})
+              UNWIND $nos AS n
+              CREATE (c:Componente) SET c = n
+              CREATE (e)-[:INCLUI]->(c)""", eid=p["estrutura"]["id"], nos=p["nos"])
+    for tipo, lista in p["rels"].items():            # `tipo` vem da whitelist TIPO_REL
+        tx.run(f"""UNWIND $rels AS r
+                   MATCH (a:Componente {{id: r.de}}), (b:Componente {{id: r.para}})
+                   CREATE (a)-[:{tipo} {{logica: r.logica}}]->(b)""", rels=lista)
+ 
+ 
+RESUMO = """
+MATCH (e:Estrutura)-[:INCLUI]->(c:Componente)
+OPTIONAL MATCH (c)-[r]->(:Componente)      // sem citar tipos: CORREQUER/EQUIVALE podem nem existir
+RETURN e.curso AS curso, e.ano AS ano, count(DISTINCT c) AS componentes, count(r) AS relacoes
+ORDER BY curso, ano
+"""
+ 
+ 
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("json", nargs="+", help="arquivos JSON canônicos")
+    args = ap.parse_args()
+ 
+    docs = []
+    for arq in args.json:
+        doc = json.loads(Path(arq).read_text(encoding="utf-8"))
+        erros = validar(doc)
+        if erros:
+            print(f"{arq}: JSON inválido:", *erros, sep="\n  - ", file=sys.stderr)
+            return 1
+        docs.append((arq, doc))
+ 
+    from neo4j import GraphDatabase
+    from neo4j.exceptions import DriverError, Neo4jError
+ 
+    cfg = config.neo4j()
+    driver = GraphDatabase.driver(cfg["uri"], auth=(cfg["user"], cfg["password"]))
+    try:
+        driver.verify_connectivity()
+    except (DriverError, Neo4jError, OSError) as e:      # DriverError cobre ServiceUnavailable e SessionExpired
+        print(f"Não conectou no Neo4j em {cfg['uri']}. Ele demora ~1 min para ficar healthy; "
+              f"confira o .env e o `docker compose ps`.\n{e}", file=sys.stderr)
+        return 2
+ 
+    with driver.session() as sessao:
+        for cmd in SCHEMA:                              # esquema fora da transação de escrita
+            sessao.run(cmd).consume()
+        for arq, doc in docs:
+            sessao.execute_write(carregar, montar(doc))
+            print(f"carregado: {arq}")
+        print("\ncurso  ano  componentes  relações")
+        for r in sessao.run(RESUMO):
+            print(f"{r['curso']:<6} {r['ano']}  {r['componentes']:>11}  {r['relacoes']:>8}")
+    driver.close()
+    return 0
+ 
+ 
+if __name__ == "__main__":
+    sys.exit(main())
+==> etl/config.py <==
+"""Lê a configuração dos bancos do arquivo .env da raiz (e das variáveis de ambiente)."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from urllib.parse import quote_plus
+
+RAIZ = Path(__file__).resolve().parents[1]
+
+
+def carregar_env(caminho: Path | None = None) -> dict[str, str]:
+    """Parser mínimo de .env (CHAVE=valor, # comentários). Ambiente real tem prioridade."""
+    valores: dict[str, str] = {}
+    arq = caminho or RAIZ / ".env"
+    if arq.exists():
+        for linha in arq.read_text(encoding="utf-8").splitlines():
+            linha = linha.strip()
+            if not linha or linha.startswith("#") or "=" not in linha:
+                continue
+            chave, _, valor = linha.partition("=")
+            valores[chave.strip()] = valor.strip().strip('"').strip("'")
+    valores.update({k: v for k, v in os.environ.items() if k in valores or k.startswith(("POSTGRES_", "MONGO_", "NEO4J_"))})
+    return valores
+
+
+def postgres() -> dict:
+    e = carregar_env()
+    return {
+        "host": e.get("POSTGRES_HOST", "localhost"),
+        "port": int(e.get("POSTGRES_PORT", 5432)),
+        "dbname": e.get("POSTGRES_DB", "curriculo"),
+        "user": e.get("POSTGRES_USER", "curriculo"),
+        "password": e.get("POSTGRES_PASSWORD", "curriculo"),
+    }
+
+
+def mongo() -> dict:
+    e = carregar_env()
+    user, senha = quote_plus(e.get("MONGO_USER", "curriculo")), quote_plus(e.get("MONGO_PASSWORD", "curriculo"))
+    host, porta = e.get("MONGO_HOST", "localhost"), e.get("MONGO_PORT", "27017")
+    return {
+        # o usuário root criado pelo container mora no banco "admin"
+        "uri": f"mongodb://{user}:{senha}@{host}:{porta}/?authSource=admin",
+        "dbname": e.get("MONGO_DB", "curriculo"),
+        "destino": f"{host}:{porta}",
+    }
+
+
+def neo4j() -> dict:
+    e = carregar_env()
+    host, porta = e.get("NEO4J_HOST", "localhost"), e.get("NEO4J_BOLT_PORT", "7687")
+    return {
+        "uri": f"bolt://{host}:{porta}",
+        "user": e.get("NEO4J_USER", "neo4j"),
+        "password": e.get("NEO4J_PASSWORD", "curriculo123"),
+    }
+==> db/postgres/init.sql <==
+-- Modelo relacional (3FN) da estrutura curricular.
+-- Idempotente (IF NOT EXISTS): roda no primeiro `docker compose up` (pasta de init do
+-- container) e também é reaplicado por etl/load_postgres.py.
+--
+-- Ideias do modelo:
+--   * curso 1:N estrutura_curricular (um curso tem várias versões: 2015, 2019...)
+--   * componente = identidade da disciplina no curso (curso + código), igual entre anos
+--   * estrutura_componente = atributos da disciplina NAQUELA estrutura (nome, carga, natureza...)
+--   * relacao_componente = N:N auto-referenciada POR estrutura: os pré-requisitos mudam
+--     de um ano para outro (ex.: TAD0029 em 2015 x 2019).
+--   * Para outro curso basta inserir outro `curso`: nada mais muda no esquema.
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- busca por nome parcial com índice
+
+CREATE TABLE IF NOT EXISTS curso (
+    id          SERIAL PRIMARY KEY,
+    sigla       TEXT NOT NULL UNIQUE,
+    nome        TEXT NOT NULL,
+    instituicao TEXT
+);
+
+CREATE TABLE IF NOT EXISTS estrutura_curricular (
+    id       SERIAL PRIMARY KEY,
+    curso_id INT  NOT NULL REFERENCES curso (id) ON DELETE CASCADE,
+    ano      INT  NOT NULL,
+    fonte    TEXT,
+    UNIQUE (curso_id, ano)
+);
+
+CREATE TABLE IF NOT EXISTS componente (
+    id       SERIAL PRIMARY KEY,
+    curso_id INT  NOT NULL REFERENCES curso (id) ON DELETE CASCADE,
+    codigo   TEXT NOT NULL,
+    UNIQUE (curso_id, codigo)
+);
+
+CREATE TABLE IF NOT EXISTS estrutura_componente (
+    estrutura_id  INT  NOT NULL REFERENCES estrutura_curricular (id) ON DELETE CASCADE,
+    componente_id INT  NOT NULL REFERENCES componente (id)           ON DELETE CASCADE,
+    nome          TEXT NOT NULL,
+    carga         INT,
+    unidade_carga TEXT,
+    natureza      TEXT NOT NULL
+        CHECK (natureza IN ('obrigatoria', 'optativa', 'atividade_complementar', 'outra')),
+    periodo       INT,
+    PRIMARY KEY (estrutura_id, componente_id)
+);
+
+-- origem é pré-requisito de destino. tipo: PRE (pré-requisito), CO (co-requisito),
+-- EQUIV (equivalência). logica: E (todas as setas contínuas) ou OU (alternativas).
+CREATE TABLE IF NOT EXISTS relacao_componente (
+    estrutura_id INT  NOT NULL,
+    origem_id    INT  NOT NULL,
+    destino_id   INT  NOT NULL,
+    tipo         TEXT NOT NULL DEFAULT 'PRE' CHECK (tipo IN ('PRE', 'CO', 'EQUIV')),
+    logica       TEXT NOT NULL DEFAULT 'E'   CHECK (logica IN ('E', 'OU')),
+    PRIMARY KEY (estrutura_id, origem_id, destino_id, tipo),
+    CHECK (origem_id <> destino_id),
+    -- as duas pontas precisam pertencer à MESMA estrutura
+    FOREIGN KEY (estrutura_id, origem_id)
+        REFERENCES estrutura_componente (estrutura_id, componente_id) ON DELETE CASCADE,
+    FOREIGN KEY (estrutura_id, destino_id)
+        REFERENCES estrutura_componente (estrutura_id, componente_id) ON DELETE CASCADE
+);
+
+-- Índices das consultas: descer (pré-requisitos de X) e subir (o que X libera)
+CREATE INDEX IF NOT EXISTS idx_rel_destino ON relacao_componente (estrutura_id, destino_id);
+CREATE INDEX IF NOT EXISTS idx_rel_origem  ON relacao_componente (estrutura_id, origem_id);
+CREATE INDEX IF NOT EXISTS idx_ec_nome_trgm
+    ON estrutura_componente USING gin (nome gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_ec_natureza ON estrutura_componente (estrutura_id, natureza);
+==> data/processed/tads_2015.json <==
+{
+  "curso": {
+    "sigla": "TADS",
+    "nome": "Tecnologia em Análise e Desenvolvimento de Sistemas",
+    "instituicao": "UFRN"
+  },
+  "estrutura": {
+    "ano": 2015,
+    "fonte": "ESTRUTURAS_CURRICULARES.pdf",
+    "pagina": 1
+  },
+  "componentes": [
+    {
+      "codigo": "TAD0001",
+      "nome": "FUNDAMENTOS DA COMPUTACAO",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0002",
+      "nome": "LOGICA COMPUTACIONAL E ALGORITMOS",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0003",
+      "nome": "BANCO DE DADOS I",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0005",
+      "nome": "MATEMATICA APLICADA I",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0006",
+      "nome": "SISTEMAS OPERACIONAIS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0007",
+      "nome": "INSTALACAO E ARQUITETURA DE COMPUTADORES",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0012",
+      "nome": "PROCESSO DE DESENVOLVIMENTO DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0004",
+      "nome": "ANALISE E PROJETO ORIENTADO A OBJETOS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0009",
+      "nome": "PROGRAMACAO ORIENTADA A OBJETOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0010",
+      "nome": "BANCO DE DADOS II",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0013",
+      "nome": "MATEMATICA APLICADA II",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0011",
+      "nome": "PROGRAMACAO VISUAL E AUTORIA WEB",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0014",
+      "nome": "REDES DE COMPUTADORES",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0015",
+      "nome": "EMPREENDEDORISMO",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0018",
+      "nome": "PROCESSAMENTO DIGITAL DE IMAGENS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0019",
+      "nome": "PROGRAMACAO WEB",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0020",
+      "nome": "ESTRUTURAS DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0023",
+      "nome": "CIRCUITOS DIGITAIS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0022",
+      "nome": "ESTATISTICA APLICADA",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0021",
+      "nome": "ENGENHARIA DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0016",
+      "nome": "VERTENTES PRODUTIVAS NAS CIENCIAS AGRARIAS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0025",
+      "nome": "INTELIGÊNCIA COMPUTACIONAL",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0027",
+      "nome": "PROGRAMACAO PARA DISPOSITIVOS MOVEIS",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0028",
+      "nome": "PLANEJAMENTO E GERENCIA DE PROJETOS",
+      "carga": 3,
+
+==> data/processed/tads_2019.json <==
+{
+  "curso": {
+    "sigla": "TADS",
+    "nome": "Tecnologia em Análise e Desenvolvimento de Sistemas",
+    "instituicao": "UFRN"
+  },
+  "estrutura": {
+    "ano": 2019,
+    "fonte": "ESTRUTURAS_CURRICULARES.pdf",
+    "pagina": 2
+  },
+  "componentes": [
+    {
+      "codigo": "TAD0001",
+      "nome": "FUNDAMENTOS DA COMPUTACAO",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0102",
+      "nome": "ALGORITMOS E PROGRAMAÇÃO",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0201",
+      "nome": "RACIOCÍNIO LÓGICO",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0105",
+      "nome": "MATEMATICA APLICADA I",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0006",
+      "nome": "SISTEMAS OPERACIONAIS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0202",
+      "nome": "LEITURA E PRODUÇÃO DE TEXTOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0012",
+      "nome": "PROCESSO DE DESENVOLVIMENTO DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0009",
+      "nome": "PROGRAMACAO ORIENTADA A OBJETOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0103",
+      "nome": "BANCO DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0013",
+      "nome": "MATEMATICA APLICADA II",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0111",
+      "nome": "PROGRAMACAO VISUAL E AUTORIA WEB",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0114",
+      "nome": "REDES DE COMPUTADORES",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0016",
+      "nome": "VERTENTES PRODUTIVAS NAS CIENCIAS AGRARIAS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0004",
+      "nome": "ANALISE E PROJETO ORIENTADO A OBJETOS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0203",
+      "nome": "GESTÃO DE QUALIDADE DE SOFTWARE",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0025",
+      "nome": "INTELIGÊNCIA COMPUTACIONAL",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0019",
+      "nome": "PROGRAMACAO WEB",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0020",
+      "nome": "ESTRUTURAS DE DADOS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0123",
+      "nome": "SISTEMAS DIGITAIS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0022",
+      "nome": "ESTATISTICA APLICADA",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0018",
+      "nome": "PROCESSAMENTO DIGITAL DE IMAGENS",
+      "carga": 4,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0027",
+      "nome": "PROGRAMACAO PARA DISPOSITIVOS MOVEIS",
+      "carga": 6,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0028",
+      "nome": "PLANEJAMENTO E GERENCIA DE PROJETOS",
+      "carga": 3,
+      "unidade_carga": "creditos",
+      "natureza": "obrigatoria",
+      "periodo": null
+    },
+    {
+      "codigo": "TAD0029",
+      "nome": "ARQUITETURA DE SOFTWARE",
+      "carga": 3,
+
+==> docker-compose.yml <==
+x-recursos: &recursos
+  cpus: 1.0
+  mem_limit: 2g
+  restart: unless-stopped
+ 
+services:
+  postgres:
+    image: postgres:16
+    <<: *recursos
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-curriculo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-curriculo}
+      POSTGRES_DB: ${POSTGRES_DB:-curriculo}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # executa os *.sql desta pasta na primeira inicialização (cria as tabelas)
+      - ./db/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+ 
+  mongo:
+    # 4.4 = última versão que roda em CPU SEM instrução AVX (5.0+ exige AVX).
+    # Já tem $graphLookup, que usamos na cadeia de pré-requisitos.
+    image: mongo:4.4
+    <<: *recursos
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-curriculo}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-curriculo}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-curriculo}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+      # executa os *.js desta pasta na primeira inicialização (cria os índices)
+      - ./db/mongo:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]   # 4.4 usa `mongo`, não `mongosh`
+      interval: 5s
+      timeout: 5s
+      retries: 10
+ 
+  neo4j:
+    image: neo4j:5-community
+    <<: *recursos
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-curriculo123}
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"   # navegador: http://localhost:7474
+      - "${NEO4J_BOLT_PORT:-7687}:7687"   # driver
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u $${NEO4J_AUTH%%/*} -p $${NEO4J_AUTH#*/} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+ 
+volumes:
+  postgres_data:
+  mongo_data:
+  neo4j_data:
