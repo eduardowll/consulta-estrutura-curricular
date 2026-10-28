@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 from backend.database import DatabaseManager
 from backend.repositories.base import CurriculoRepository
 from texto import normalizar
@@ -32,7 +33,7 @@ class MongoRepository(CurriculoRepository):
         if codigo:
             filtro["codigo"] = codigo.upper()
         if nome:
-            filtro["nome_norm"] = {"$regex": normalizar(nome)}
+            filtro["nome_norm"] = {"$regex": re.escape(normalizar(nome))}
         if natureza:
             filtro["natureza"] = natureza
         if periodo is not None:

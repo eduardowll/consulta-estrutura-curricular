@@ -17,13 +17,49 @@ NATUREZAS = {"obrigatoria", "optativa", "atividade_complementar", "outra"}
 
 def validar(doc: dict) -> list[str]:
     erros: list[str] = []
-    for chave in ("curso", "estrutura", "componentes", "relacoes"):
-        if chave not in doc:
-            return [f"JSON sem a chave obrigatória '{chave}'"]
-    if not doc["curso"].get("sigla") or not doc["curso"].get("nome"):
-        erros.append("curso precisa de 'sigla' e 'nome'")
-    if not isinstance(doc["estrutura"].get("ano"), int):
+    if not isinstance(doc, dict):
+        return ["JSON precisa ser um objeto"]
+    for chave, tipo in (("curso", dict), ("estrutura", dict), ("componentes", list), ("relacoes", list)):
+        if not isinstance(doc.get(chave), tipo):
+            return [f"'{chave}' ausente ou com tipo inválido"]
+    for chave in ("sigla", "nome"):
+        if not isinstance(doc["curso"].get(chave), str) or not doc["curso"][chave].strip():
+            erros.append(f"curso.{chave} precisa ser texto não vazio")
+    sigla = doc["curso"].get("sigla", "")
+    if isinstance(sigla, str) and (sigla != sigla.strip().upper()):
+        erros.append("curso.sigla deve estar em maiúsculas, sem espaços nas extremidades")
+    if type(doc["estrutura"].get("ano")) is not int:
         erros.append("estrutura.ano precisa ser inteiro")
+    for objeto, chave in ((doc["curso"], "instituicao"), (doc["estrutura"], "fonte")):
+        if objeto.get(chave) is not None and not isinstance(objeto[chave], str):
+            erros.append(f"{chave} precisa ser texto")
+    if not doc["componentes"]:
+        erros.append("componentes não pode estar vazio")
+    for c in doc["componentes"]:
+        if not isinstance(c, dict):
+            return ["cada componente precisa ser um objeto"]
+        for chave in ("codigo", "nome", "natureza"):
+            if not isinstance(c.get(chave), str) or not c[chave].strip():
+                erros.append(f"componente.{chave} precisa ser texto não vazio")
+        codigo = c.get("codigo")
+        if isinstance(codigo, str) and codigo != codigo.strip().upper():
+            erros.append("código deve estar em maiúsculas, sem espaços nas extremidades")
+        for chave, minimo in (("carga", 0), ("periodo", 1)):
+            valor = c.get(chave)
+            if valor is not None and (type(valor) is not int or valor < minimo):
+                erros.append(f"{chave} precisa ser inteiro >= {minimo}")
+        if c.get("unidade_carga") is not None and not isinstance(c["unidade_carga"], str):
+            erros.append("unidade_carga precisa ser texto")
+    for r in doc["relacoes"]:
+        if not isinstance(r, dict):
+            return ["cada relação precisa ser um objeto"]
+        for chave in ("origem", "destino", "tipo", "logica"):
+            if chave in r and not isinstance(r[chave], str):
+                erros.append(f"relação.{chave} precisa ser texto")
+        if not r.get("origem") or not r.get("destino"):
+            erros.append("relação precisa de origem e destino")
+    if erros:
+        return erros
 
     codigos = [c.get("codigo") for c in doc["componentes"]]
     if len(set(codigos)) != len(codigos):

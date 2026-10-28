@@ -6,6 +6,7 @@ from psycopg2.extras import RealDictCursor
 from backend.database import DatabaseManager
 from backend.repositories.base import CurriculoRepository
 import load_postgres  # importado via sys.path configurado no database.py
+from texto import normalizar
 
 
 class PostgresRepository(CurriculoRepository):
@@ -20,7 +21,7 @@ class PostgresRepository(CurriculoRepository):
             JOIN curso cu ON cu.id = e.curso_id
             ORDER BY cu.sigla, e.ano
         """
-        with DatabaseManager.pg_conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with DatabaseManager.postgres_connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql)
             return [dict(r) for r in cur.fetchall()]
 
@@ -59,7 +60,7 @@ class PostgresRepository(CurriculoRepository):
             WHERE cu.sigla = %(curso)s
               AND e.ano = %(ano)s
               AND (%(codigo)s IS NULL OR c.codigo = %(codigo)s)
-              AND (%(nome)s IS NULL OR ec.nome ILIKE %(nome_like)s)
+              AND (%(nome)s IS NULL OR translate(lower(ec.nome), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') LIKE %(nome_like)s)
               AND (%(natureza)s IS NULL OR ec.natureza = %(natureza)s)
               AND (%(periodo)s IS NULL OR ec.periodo = %(periodo)s)
               AND (%(exige_prereq)s IS NULL OR EXISTS (
@@ -67,6 +68,7 @@ class PostgresRepository(CurriculoRepository):
                   JOIN componente c_pre ON c_pre.id = r2.origem_id
                   WHERE r2.estrutura_id = e.id
                     AND r2.destino_id = c.id
+                    AND r2.tipo = 'PRE'
                     AND c_pre.codigo = %(exige_prereq)s
               ))
             GROUP BY c.codigo, ec.nome, ec.carga, ec.unidade_carga, ec.natureza, ec.periodo
@@ -77,12 +79,12 @@ class PostgresRepository(CurriculoRepository):
             "ano": ano,
             "codigo": codigo.upper() if codigo else None,
             "nome": nome,
-            "nome_like": f"%{nome}%" if nome else None,
+            "nome_like": "%" + normalizar(nome).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" if nome else None,
             "natureza": natureza,
             "periodo": periodo,
             "exige_prereq": exige_prereq.upper() if exige_prereq else None,
         }
-        with DatabaseManager.pg_conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with DatabaseManager.postgres_connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
 
@@ -117,7 +119,7 @@ class PostgresRepository(CurriculoRepository):
                 JOIN relacao_componente r ON r.estrutura_id = est.estrutura_id AND r.destino_id = p.id
                 JOIN componente c ON c.id = r.origem_id
                 JOIN estrutura_componente ec ON ec.estrutura_id = est.estrutura_id AND ec.componente_id = c.id
-                WHERE r.tipo = 'PRE' AND p.nivel < 10
+                WHERE r.tipo = 'PRE'
             ),
             libera(id, codigo, nome, nivel) AS (
                 SELECT c.id, c.codigo, ec.nome, 1
@@ -134,7 +136,7 @@ class PostgresRepository(CurriculoRepository):
                 JOIN relacao_componente r ON r.estrutura_id = est.estrutura_id AND r.origem_id = l.id
                 JOIN componente c ON c.id = r.destino_id
                 JOIN estrutura_componente ec ON ec.estrutura_id = est.estrutura_id AND ec.componente_id = c.id
-                WHERE r.tipo = 'PRE' AND l.nivel < 10
+                WHERE r.tipo = 'PRE'
             )
             SELECT
                 (SELECT json_build_object('codigo', codigo, 'nome', nome) FROM alvo) AS componente,
@@ -148,12 +150,12 @@ class PostgresRepository(CurriculoRepository):
                 ), '[]'::json) AS libera_cadeia;
         """
         params = {"curso": curso.upper(), "ano": ano, "codigo": codigo.upper()}
-        with DatabaseManager.pg_conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with DatabaseManager.postgres_connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             row = cur.fetchone()
             return dict(row) if row else {"componente": None, "prerequisitos_cadeia": [], "libera_cadeia": []}
 
     def salvar_estrutura(self, doc: dict[str, Any]) -> None:
-        with DatabaseManager.pg_conn.cursor() as cur:
+        with DatabaseManager.postgres_connection() as conn, conn.cursor() as cur:
             for sql, params in load_postgres.comandos(doc):
                 cur.execute(sql, params)

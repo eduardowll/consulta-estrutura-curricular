@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#121413">
+  <meta name="description" content="Explore estruturas curriculares, disciplinas e cadeias de pré-requisitos.">
+  <title>Trama · Estruturas curriculares</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+<svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 3v17h17M9 15V9m5 6V5m5 10v-4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1Zm0 0v15"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></symbol>
+  <symbol id="i-nodes" viewBox="0 0 24 24"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="16" y="2" width="6" height="6" rx="1.5"/><rect x="16" y="16" width="6" height="6" rx="1.5"/><path d="M8 12h4m4-7h-2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 19 19 5M6 5h13v13"/></symbol>
+</defs></svg>
+<a class="skip-link" href="#main">Ir para o conteúdo</a>
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Trama, início"><span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-nodes"/></svg></span><span>trama<span class="brand-sub">SEU MAPA ACADÊMICO</span></span></a>
+  <div class="nav-label">ESPAÇO ACADÊMICO</div>
+  <nav aria-label="Navegação principal">
+    <button class="nav-item active" data-view="catalog" aria-label="Visão geral" title="Visão geral" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span class="nav-text">Visão geral</span></button>
+    <button class="nav-item" data-view="compare" aria-label="Comparar consultas" title="Comparar consultas"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span class="nav-text">Comparar consultas</span></button>
+  </nav>
+  <div class="sidebar-note"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><h2>Conheça seu caminho.</h2><p>Da primeira disciplina às conexões que vêm depois.</p><span class="note-line" aria-hidden="true"></span></div>
+  <div class="sidebar-bottom"><button id="import-open" class="nav-item" aria-label="Importar estrutura" title="Importar estrutura"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span class="nav-text">Importar estrutura</span></button><div class="sidebar-status"><span class="status-dot" id="status-dot"></span><span id="connection-status">Conectando aos dados…</span></div><a href="/docs" target="_blank" rel="noopener" class="api-link">Documentação da API <span aria-hidden="true">↗</span></a></div>
+</aside>
+<div class="workspace">
+  <header class="topbar"><span class="breadcrumb">Meu espaço <span class="slash">/</span> <strong id="current-page">Visão geral</strong></span><div class="workspace-label"><span class="status-dot connected"></span> EXPLORADOR CURRICULAR</div></header>
+  <main id="main">
+    <div class="page-heading"><div><h1>Sua formação, <span>por inteiro.</span></h1><p>Disciplinas, pré-requisitos e possibilidades. Tudo conectado.</p></div><button id="export" class="button secondary" disabled><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Exportar CSV</button></div>
+    <section class="course-bar" aria-label="Selecionar estrutura"><div class="course-monogram" aria-hidden="true">EC</div><label class="course-field"><span>CURSO</span><select id="course" aria-label="Curso"><option>Carregando cursos…</option></select></label><label class="year-field"><span>MATRIZ</span><select id="year" aria-label="Ano da matriz"><option>—</option></select></label><label class="database-field"><span>CONSULTAR EM</span><select id="database" aria-label="Banco de dados"><option value="postgres">PostgreSQL</option><option value="mongo">MongoDB</option><option value="neo4j">Neo4j</option></select></label></section>
+    <div id="page-error" class="notice error" role="alert" hidden></div>
+    <section class="stats" aria-label="Resumo da matriz">
+      <div class="stat-card stat-total"><div class="stat-label"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span>Componentes</span></div><strong id="stat-total">—</strong><div class="stat-caption">Na matriz selecionada <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></div></div>
+      <div class="stat-card stat-light"><div class="stat-label"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Obrigatórios</span></div><strong id="stat-required">—</strong><div class="stat-caption">A base da sua formação</div><div class="stat-track" aria-hidden="true"><span id="required-bar"></span></div></div>
+      <div class="stat-card stat-optional"><div class="stat-label"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg><span>Optativos</span></div><strong id="stat-optional">—</strong><div class="stat-caption">Blocos previstos na matriz</div></div>
+      <div class="stat-card stat-coral"><div class="stat-label"><svg class="icon" aria-hidden="true"><use href="#i-nodes"/></svg><span>Conexões</span></div><strong id="stat-relations">—</strong><div class="stat-caption">Relações entre componentes <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></div></div>
+    </section>
+    <section id="catalog-view">
+      <div class="section-heading"><div><h2>Explore sua matriz</h2><p class="section-description">Selecione uma disciplina e descubra suas conexões.</p></div><span class="section-tag" id="matrix-note">CATÁLOGO CURRICULAR</span></div>
+      <div class="catalog-layout"><div class="catalog">
+        <div class="catalog-toolbar"><div class="search-box"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" placeholder="Buscar por nome ou código…" aria-label="Buscar disciplina por nome ou código"><kbd>/</kbd></div></div>
+        <div class="filter-row" role="group" aria-label="Filtrar por natureza"><button class="filter active" data-filter="" aria-pressed="true">Todas</button><button class="filter" data-filter="obrigatoria" aria-pressed="false">Obrigatórias</button><button class="filter" data-filter="optativa" aria-pressed="false">Optativas</button><button class="filter" data-filter="atividade_complementar" aria-pressed="false">Atividades</button></div>
+        <div class="list-meta"><span id="result-count" aria-live="polite">Carregando disciplinas…</span><label>Ordenar por <select id="sort" aria-label="Ordenar disciplinas"><option value="nome">Nome A–Z</option><option value="codigo">Código</option><option value="carga">Maior carga</option></select></label></div>
+        <div class="table-wrap"><table><thead><tr><th scope="col">DISCIPLINA</th><th scope="col">NATUREZA</th><th scope="col" class="load-col">CARGA</th><th scope="col"><span class="sr-only">Detalhes</span></th></tr></thead><tbody id="components"></tbody></table></div>
+        <div id="empty" class="empty" hidden><span aria-hidden="true">⌕</span><h3>Nenhuma disciplina encontrada</h3><p>Tente outro nome, código ou natureza.</p><button id="clear-filters" class="text-button">Limpar filtros</button></div>
+        <div class="catalog-footer"><span><span class="tiny-dot"></span> <span id="query-time">Aguardando consulta</span></span><span>Selecione para explorar <span aria-hidden="true">↗</span></span></div>
+      </div><aside id="detail" class="detail" aria-label="Detalhes da disciplina" aria-live="polite"><div class="detail-placeholder"><span aria-hidden="true">↖</span><h3>Cada disciplina faz parte de um caminho.</h3><p>Selecione um componente para consultar seus pré-requisitos e o que ele libera.</p></div></aside></div>
+    </section>
+    <section id="compare-view" hidden><div class="section-heading"><h2>Uma consulta, três bancos</h2><button id="run-compare" class="button primary">Executar comparação <span aria-hidden="true">↗</span></button></div><p class="compare-intro">Consulte todos os componentes da matriz selecionada e confira os resultados de cada banco.</p><div id="comparison" class="comparison"><p>Execute uma consulta para medir os tempos e verificar se os resultados são iguais.</p></div><p class="footnote">Os tempos representam uma execução no servidor. Cache, carga e ordem das consultas influenciam o resultado; esta medição não é um benchmark.</p></section>
+    <footer class="page-footer"><span><strong>trama</strong><span class="footer-divider">/</span> Conhecimento conectado.</span><span id="source">Fonte: estruturas curriculares</span></footer>
+  </main>
+</div>
+<dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">AMPLIE O CATÁLOGO</div><h2>Importar estrutura</h2></div><button type="button" id="import-close" class="icon-button" aria-label="Fechar importação">×</button></div><p>Selecione um JSON no formato canônico do projeto. A estrutura será registrada nos três bancos.</p><label class="file-label" for="import-file">Arquivo da estrutura <input id="import-file" type="file" accept=".json,application/json" required></label><div id="import-preview" class="notice" hidden></div><label class="confirm-label"><input id="import-confirm" type="checkbox" required> Entendo que uma matriz com o mesmo curso e ano será substituída.</label><p id="import-message" role="status"></p><div class="dialog-actions"><button type="button" id="import-cancel" class="button secondary">Cancelar</button><button id="import-submit" type="submit" class="button primary" disabled>Importar nos três bancos</button></div></form></dialog>
+</body></html>

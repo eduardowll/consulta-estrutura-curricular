@@ -38,7 +38,7 @@ class Neo4jRepository(CurriculoRepository):
               AND ($nome_norm IS NULL OR c.nome_norm CONTAINS $nome_norm)
               AND ($natureza IS NULL OR c.natureza = $natureza)
               AND ($periodo IS NULL OR c.periodo = $periodo)
-              AND ($exige_prereq IS NULL OR (c)-[:REQUER|CORREQUER|EQUIVALE]->(:Componente {codigo: $exige_prereq}))
+              AND ($exige_prereq IS NULL OR (c)-[:REQUER]->(:Componente {codigo: $exige_prereq}))
             OPTIONAL MATCH (c)-[r:REQUER|CORREQUER|EQUIVALE]->(pre:Componente)
             WITH c, pre, r ORDER BY pre.codigo
             RETURN c.codigo AS codigo, c.nome AS nome, c.carga AS carga,
